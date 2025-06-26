@@ -7,6 +7,7 @@ function SimpleRecordButton() {
 	const [audioBlob, setAudioBlob] = useState(null);
 	const [recordingTime, setRecordingTime] = useState(0);
 	const timerRef = useRef(null);
+	const [transcriptJson, setTranscriptJson] = useState(null);
 	const RECORDING_MAX_DURATION = 240; // optional 
   const portNumber = 8000;
 
@@ -99,7 +100,8 @@ function SimpleRecordButton() {
       } 
       const data = await response.json();
       console.log("Upload successful:", data);
-      return data
+		setTranscriptJson(data.jobUrl); // do not stringify
+	return data;
 
     } catch (error) {
       console.error("Error uploading audio:", error);
@@ -149,8 +151,16 @@ return (
           <button className="btn btn-primary mt-3" onClick={()=>handleSendAudio(audioBlob)}>Send Audio</button> 
         </>
       ) : (
-        <button className="btn btn-primary mt-3">No Audio Available</button>
+        <button className="btn btn-grey mt-3">No Audio Available</button>
       )}
+		{transcriptJson && (
+	<div className="mt-4 p-3 border rounded bg-light">
+		<h5>Full Transcription JSON:</h5>
+		<pre style={{ whiteSpace: "pre-wrap", wordBreak: "break-word", fontSize: "0.9rem" }}>
+		{JSON.stringify(transcriptJson, null, 2)}
+		</pre>
+	</div>
+	)}
   </div>
 );
 

@@ -1,0 +1,10 @@
+Frontend instructions:
+In terminal:
+1. cd Frontend
+2. "npm i" to download all dependencies and libraries used
+3. npm start
+
+Backend
+In new terminal:
+1. cd frontend/backend
+2. node index.js

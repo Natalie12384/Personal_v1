@@ -26,36 +26,40 @@ app.post("/upload_audio", upload.single("audio"), async (req, res) => {
 
   try {
     const audioBuffer = req.file.buffer;
-    const originalName = req.file.originalname || "audio.wav";
-    const blobName = `upload_${Date.now()}_${originalName}`;
-    const fullBlobUrl = `${CONTAINER_BLOB_URL}/${blobName}${CONTAINER_BLOB_UPLOAD_SAS}`;
-    console.log(fullBlobUrl)
+    const originalName = req.file.originalname || "audio.wav"; //convert .webm to .wav
+    const blobName = `upload_${Date.now()}_${originalName}`; //placeholder naming convention for audio file
+    const fullBlobUrl = `${CONTAINER_BLOB_URL}/${blobName}${CONTAINER_BLOB_UPLOAD_SAS}`; // url for the audio file
 
     // Upload to Azure Blob Storage using SAS
     const blockBlobClient = new BlobServiceClient(
       `${CONTAINER_URL}${CONTAINER_BLOB_UPLOAD_SAS}`
     )
-      .getContainerClient('test1')
+      .getContainerClient('test1') // blob storage name for now
       .getBlockBlobClient(blobName);
 
     await blockBlobClient.uploadData(audioBuffer, {
       blobHTTPHeaders: { blobContentType: req.file.mimetype }
     });
 
-    console.log(`Uploaded to Blob: ${blobName}`);
+    console.log(`Uploaded to Blob: ${fullBlobUrl}`);
 
-    // Submit transcription job
-
+    // Submit transcription job to get reciept
     const transcriptionResponse = await axios.post(
       `https://${AZURE_REGION}.api.cognitive.microsoft.com/speechtotext/transcriptions:submit?api-version=2024-11-15`,
       {
         displayName: "My Audio Transcription",
         locale: "en-US",
         contentUrls: [`${CONTAINER_BLOB_URL}/${blobName}${CONTAINER_BLOB_SAS}`],
+        //contentContainerUrl : "link to container with SAS"
         properties: {
-          wordLevelTimestampsEnabled: true,
-          diarizationEnabled: true,
-          timeToLiveHours: "6" //idk, shortest support is 6 hours, but all audio currently is less
+          wordLevelTimestampsEnabled: false,
+          diarization: {
+            enabled: true,
+            maxSpeakers: 5
+          },
+          displayFormWordLevelTimestampsEnabled: true,
+          punctuationMode: "DictatedAndAutomatic",
+          timeToLiveHours: 6 // how long this result stays in storage for
         }
       },
       {
@@ -66,13 +70,58 @@ app.post("/upload_audio", upload.single("audio"), async (req, res) => {
       }
     );
 
-    const jobLocation = transcriptionResponse.headers["location"];
+    //transcription job id
+    var jobStatus = transcriptionResponse.data.status; //initially the job is NotStarted
+    const job = transcriptionResponse.data.self;
+    var gettranscriptionResponse = null
+    //wait until job finishes
+    while (jobStatus === "NotStarted" || jobStatus === "Running"){
+      //get transcription jsons
+      gettranscriptionResponse = await axios.get(
+        job,
+        {
+          headers: { //headersv
+            "Ocp-Apim-Subscription-Key": AZURE_KEY,
+            "Content-Type": "application/json"
+          }
+        }
+      );
+      jobStatus = gettranscriptionResponse.data.status;
+      await new Promise(resolve => setTimeout(resolve, 2000));
+    }
+
+    //get transcription
+    const jobLocation = transcriptionResponse.data.links.files;
+    //get request for the batch job 
+    const transcriptRef = await axios.get(
+      jobLocation,
+      {
+        headers: { //headersv
+          "Ocp-Apim-Subscription-Key": AZURE_KEY,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+
+    var find = false
+    var index = 0
+    var transcript = null
+    while (find === false){
+      if (transcriptRef.data.values[index].kind === "Transcription"){
+        transcript = transcriptRef.data.values[index].links.contentUrl;
+        find = true;
+      }
+      index ++;
+    }
+    //get request for final transcript url
+    const gettranscript = await axios.get(transcript);
+    
+    //return repsonse to front end
+    console.log("Completed transcription.")
     res.status(202).json({
       message: "Transcription job submitted",
-      jobUrl: jobLocation
+      jobUrl: gettranscript.data
     });
-
-
   } catch (err) {
     console.error("Error:", err.response?.data || err.message);
     res.status(500).json({ error: "Failed to submit transcription job" });
