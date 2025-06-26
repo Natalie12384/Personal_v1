@@ -5,6 +5,19 @@ const axios = require("axios");
 const { BlobServiceClient } = require("@azure/storage-blob");
 require("dotenv").config();
 
+
+//doqnloadable file path
+const path = require("path");
+const fs = require("fs");
+
+const jsonDirPath = path.resolve(__dirname, "../json_script");
+
+// Ensure directory exists
+if (!fs.existsSync(jsonDirPath)) {
+  fs.mkdirSync(jsonDirPath, { recursive: true });
+}
+
+//constant values
 const app = express();
 const PORT = 8000;
 
@@ -18,6 +31,20 @@ const CONTAINER_BLOB_UPLOAD_SAS = process.env.CONTAINER_BLOB_UPLOAD_SAS;
 
 app.use(cors());
 const upload = multer({ storage: multer.memoryStorage() });
+
+//util functions
+//routing logic to download an json trnsciption into the json_script folder
+const saveJson= (data) => {
+  try {
+    const fileName = `transcript_${Date.now()}.json`; //named after milliseconds
+    const filePath = path.join(jsonDirPath, fileName);
+    fs.writeFileSync(filePath, JSON.stringify(data, null, 2), "utf8");
+  } catch (err) {
+    console.error("❌ Failed to write file:", err);
+
+  }
+};
+
 
 //convert json into text transcript
 const prettify = (obj) => {
@@ -134,18 +161,28 @@ app.post("/upload_audio", upload.single("audio"), async (req, res) => {
     const gettranscript = await axios.get(transcript);
     
     //return repsonse to front end
+    const data = gettranscript.data //final dialogue transcript 
+    saveJson(data) // save json file to json_script folder
+    console.log("data saved in json_script folder.")//success message
+
+    //prettify json text to proper dialogue
+    const text_format = prettify(data)
     console.log("Completed transcription.")
-    const text_format = prettify(gettranscript.data)
+
+    //return to frontend with data
     res.status(202).json({
       message: "Transcription job submitted",
       text_format: text_format,
-      jobUrl: gettranscript.data
+      jobUrl: data
     });
   } catch (err) {
     console.error("Error:", err.response?.data || err.message);
     res.status(500).json({ error: "Failed to submit transcription job" });
   }
 });
+
+
+
 
 app.listen(PORT, () => {
   console.log(`Server listening on http://localhost:${PORT}`);
