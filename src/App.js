@@ -7,8 +7,12 @@ function SimpleRecordButton() {
 	const [audioBlob, setAudioBlob] = useState(null);
 	const [recordingTime, setRecordingTime] = useState(0);
 	const timerRef = useRef(null);
+	const [activeTab, setActiveTab] = useState("json"); // "json" or "text"
+	const [maxSpeakers, setMaxSpeakers] = useState(2);
+	//output values
 	const [transcriptJson, setTranscriptJson] = useState(null);
-	const RECORDING_MAX_DURATION = 240; // optional 
+	const [transcriptText, setTranscriptText] = useState(null);
+
   const portNumber = 8000;
 
 	useEffect(() => {
@@ -87,6 +91,7 @@ function SimpleRecordButton() {
 
     const formData = new FormData();
     formData.append("audio", audioBlob, "recording.wav");
+	formData.append("maxSpeakers", maxSpeakers);
 
     try { // send audio via post request
       const bkUrl = "http://localhost:" + portNumber + "/upload_audio";
@@ -101,8 +106,9 @@ function SimpleRecordButton() {
       const data = await response.json();
       console.log("Upload successful:", data);
 		setTranscriptJson(data.jobUrl); // do not stringify
+		setTranscriptText(data.text_format);
 	return data;
-
+	  //any error is caught
     } catch (error) {
       console.error("Error uploading audio:", error);
     } 
@@ -110,25 +116,46 @@ function SimpleRecordButton() {
   }
 // html
 return (
-  <div className="container mt-4">
+  <div className="container mt-5">
+    {/* Title */}
+    <h3 className="mb-4">Audio Recorder & Transcription</h3>
+
+    {/* Max Speakers Input */}
+    <div className="mb-4">
+      <label htmlFor="maxSpeakers" className="form-label fw-semibold">
+        Max Number of Speakers
+      </label>
+      <input
+        type="number"
+        id="maxSpeakers"
+        className="form-control"
+        min="1"
+        value={maxSpeakers}
+        onChange={(e) => setMaxSpeakers(parseInt(e.target.value) || 1)}
+        placeholder="Enter max number of speakers"
+      />
+    </div>
+
     {/* Record Button */}
-    <button
-      onClick={handleToggleRecording}
-      className={`btn ${isRecording ? "btn-danger" : "btn-success"} px-4 py-2`}
-    >
-      {isRecording ? (
-        <>
-          <span className="me-2">●</span> Stop Recording
-        </>
-      ) : (
-        "Start Recording"
-      )}
-    </button>
+    <div className="mb-3">
+      <button
+        onClick={handleToggleRecording}
+        className={`btn ${isRecording ? "btn-danger" : "btn-success"} px-4 py-2`}
+      >
+        {isRecording ? (
+          <>
+            <span className="me-2">●</span> Stop Recording
+          </>
+        ) : (
+          "Start Recording"
+        )}
+      </button>
+    </div>
 
     {/* Recording Status */}
     {isRecording && (
-      <div className="text-center mt-3">
-        <p className="text-muted small">Recording...</p>
+      <div className="text-center mb-3">
+        <p className="text-muted small">Recording in progress...</p>
         <p className="fw-bold font-monospace">
           Time: {formatTime(recordingTime)}
         </p>
@@ -137,30 +164,64 @@ return (
 
     {/* Playback */}
     {audioBlob && (
-      <div className="mt-4">
-        <p className="mb-1 fw-semibold">Playback:</p>
+      <div className="mb-4">
+        <p className="fw-semibold">Playback:</p>
         <audio controls className="w-100">
           <source src={URL.createObjectURL(audioBlob)} type="audio/wav" />
         </audio>
       </div>
     )}
 
-    {/* Send audio */}
-    {audioBlob ? (
-        <>
-          <button className="btn btn-primary mt-3" onClick={()=>handleSendAudio(audioBlob)}>Send Audio</button> 
-        </>
+    {/* Send Audio Button */}
+    <div className="mb-4">
+      {audioBlob ? (
+        <button className="btn btn-primary" onClick={() => handleSendAudio(audioBlob)}>
+          Send Audio
+        </button>
       ) : (
-        <button className="btn btn-grey mt-3">No Audio Available</button>
+        <button className="btn btn-secondary" disabled>
+          No Audio Available
+        </button>
       )}
-		{transcriptJson && (
-	<div className="mt-4 p-3 border rounded bg-light">
-		<h5>Full Transcription JSON:</h5>
-		<pre style={{ whiteSpace: "pre-wrap", wordBreak: "break-word", fontSize: "0.9rem" }}>
-		{JSON.stringify(transcriptJson, null, 2)}
-		</pre>
-	</div>
-	)}
+    </div>
+
+    {/* Transcript Display */}
+    {(transcriptJson || transcriptText) && (
+      <div className="p-4 border rounded bg-light">
+        <div className="d-flex mb-3">
+          <button
+            className={`btn me-2 ${activeTab === "json" ? "btn-primary" : "btn-outline-primary"}`}
+            onClick={() => setActiveTab("json")}
+          >
+            JSON View
+          </button>
+          <button
+            className={`btn ${activeTab === "text" ? "btn-primary" : "btn-outline-primary"}`}
+            onClick={() => setActiveTab("text")}
+          >
+            Text View
+          </button>
+        </div>
+
+        {activeTab === "json" && transcriptJson && (
+          <>
+            <h5>Full Transcription JSON:</h5>
+            <pre style={{ whiteSpace: "pre-wrap", wordBreak: "break-word", fontSize: "0.9rem" }}>
+              {JSON.stringify(transcriptJson, null, 2)}
+            </pre>
+          </>
+        )}
+
+        {activeTab === "text" && transcriptText && (
+          <>
+            <h5>Full Transcript Text:</h5>
+            <div style={{ whiteSpace: "pre-wrap", wordBreak: "break-word", fontSize: "0.95rem" }}>
+              {transcriptText}
+            </div>
+          </>
+        )}
+      </div>
+    )}
   </div>
 );
 

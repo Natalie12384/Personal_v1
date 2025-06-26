@@ -19,6 +19,20 @@ const CONTAINER_BLOB_UPLOAD_SAS = process.env.CONTAINER_BLOB_UPLOAD_SAS;
 app.use(cors());
 const upload = multer({ storage: multer.memoryStorage() });
 
+//convert json into text transcript
+const prettify = (obj) => {
+  var dialogue = ""
+  try{
+    const text = obj.recognizedPhrases
+    for (var i = 0; i < text.length; i++){
+      dialogue += "[speaker "+ text[i].speaker + "]\n";
+      dialogue += text[i].nBest[0].display + "\n";
+    }
+  }catch (error){}
+  return dialogue;
+}
+
+//routing logic to upload audio to blob storage and Azure service
 app.post("/upload_audio", upload.single("audio"), async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ error: "No audio file uploaded" });
@@ -41,9 +55,12 @@ app.post("/upload_audio", upload.single("audio"), async (req, res) => {
       blobHTTPHeaders: { blobContentType: req.file.mimetype }
     });
 
+    //completed blob upload message 
     console.log(`Uploaded to Blob: ${fullBlobUrl}`);
 
     // Submit transcription job to get reciept
+    //max speakers
+    const maxSpeakers = parseInt(req.body.maxSpeakers) || 2;
     const transcriptionResponse = await axios.post(
       `https://${AZURE_REGION}.api.cognitive.microsoft.com/speechtotext/transcriptions:submit?api-version=2024-11-15`,
       {
@@ -55,7 +72,7 @@ app.post("/upload_audio", upload.single("audio"), async (req, res) => {
           wordLevelTimestampsEnabled: false,
           diarization: {
             enabled: true,
-            maxSpeakers: 5
+            maxSpeakers: maxSpeakers
           },
           displayFormWordLevelTimestampsEnabled: true,
           punctuationMode: "DictatedAndAutomatic",
@@ -102,7 +119,7 @@ app.post("/upload_audio", upload.single("audio"), async (req, res) => {
         }
       }
     );
-
+    //find 
     var find = false
     var index = 0
     var transcript = null
@@ -118,8 +135,10 @@ app.post("/upload_audio", upload.single("audio"), async (req, res) => {
     
     //return repsonse to front end
     console.log("Completed transcription.")
+    const text_format = prettify(gettranscript.data)
     res.status(202).json({
       message: "Transcription job submitted",
+      text_format: text_format,
       jobUrl: gettranscript.data
     });
   } catch (err) {
