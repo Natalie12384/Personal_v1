@@ -4,6 +4,7 @@ const multer = require("multer");
 const axios = require("axios");
 const { BlobServiceClient } = require("@azure/storage-blob");
 require("dotenv").config();
+const FormData = require("form-data");
 
 
 //doqnloadable file path
@@ -32,7 +33,7 @@ const CONTAINER_BLOB_UPLOAD_SAS = process.env.CONTAINER_BLOB_UPLOAD_SAS;
 app.use(cors());
 const upload = multer({ storage: multer.memoryStorage() });
 
-//util functions
+//util functions --------------------------------
 //routing logic to download an json trnsciption into the json_script folder
 const saveJson= (data) => {
   try {
@@ -44,8 +45,6 @@ const saveJson= (data) => {
 
   }
 };
-
-
 //convert json into text transcript
 const prettify = (obj) => {
   var dialogue = ""
@@ -58,37 +57,38 @@ const prettify = (obj) => {
   }catch (error){}
   return dialogue;
 }
+// prettifies Fast transcription json
+const prettifyFast = (obj) => {
+  var dialogue = ""
+  try{
+    const text = obj.phrases
+    for (var i = 0; i < text.length; i++){
+      dialogue += "[speaker "+ text[i].speaker + "]\n";
+      dialogue += text[i].text + "\n";
+    }
+  }catch (error){}
+  return dialogue;
+}
 
-//routing logic to upload audio to blob storage and Azure service
-app.post("/upload_audio", upload.single("audio"), async (req, res) => {
-  if (!req.file) {
-    return res.status(400).json({ error: "No audio file uploaded" });
-  }
-
-  try {
-    const audioBuffer = req.file.buffer;
-    const originalName = req.file.originalname || "audio.wav"; //convert .webm to .wav
-    const blobName = `upload_${Date.now()}_${originalName}`; //placeholder naming convention for audio file
-    const fullBlobUrl = `${CONTAINER_BLOB_URL}/${blobName}${CONTAINER_BLOB_UPLOAD_SAS}`; // url for the audio file
+//save to blob storage
+const saveBlob = async (fileName, type, audioBuffer, containerName  ) =>{
+    const fullBlobUrl = `${CONTAINER_BLOB_URL}/${fileName}${CONTAINER_BLOB_UPLOAD_SAS}`; // url for the audio file
 
     // Upload to Azure Blob Storage using SAS
     const blockBlobClient = new BlobServiceClient(
       `${CONTAINER_URL}${CONTAINER_BLOB_UPLOAD_SAS}`
     )
-      .getContainerClient('test1') // blob storage name for now
-      .getBlockBlobClient(blobName);
+      .getContainerClient(containerName ) // blob storage name for now
+      .getBlockBlobClient(fileName);
 
     await blockBlobClient.uploadData(audioBuffer, {
-      blobHTTPHeaders: { blobContentType: req.file.mimetype }
+      blobHTTPHeaders: { blobContentType: type }
     });
-
-    //completed blob upload message 
-    console.log(`Uploaded to Blob: ${fullBlobUrl}`);
-
-    // Submit transcription job to get reciept
-    //max speakers
-    const maxSpeakers = parseInt(req.body.maxSpeakers) || 2;
-    const transcriptionResponse = await axios.post(
+    return fullBlobUrl
+}
+//trascription functions -----------------------
+const  batchTranscript = async (blobName, maxSpeakers) =>{
+  const transcriptionResponse = await axios.post(
       `https://${AZURE_REGION}.api.cognitive.microsoft.com/speechtotext/transcriptions:submit?api-version=2024-11-15`,
       {
         displayName: "My Audio Transcription",
@@ -160,8 +160,71 @@ app.post("/upload_audio", upload.single("audio"), async (req, res) => {
     //get request for final transcript url
     const gettranscript = await axios.get(transcript);
     
-    //return repsonse to front end
-    const data = gettranscript.data //final dialogue transcript 
+    //return repsonse json
+    return gettranscript.data //final dialogue transcript 
+}
+
+//routing for fast Transcript
+app.post("/fast_transcript",upload.single("audio"), async (req, res)=>{
+  try {
+  if (!req.file) {
+    return res.status(400).json({ error: "No audio file uploaded" });
+  }
+
+  //create input 
+  const definition = JSON.parse(req.body.definition || "{}");
+  const form = new FormData();
+  form.append("audio", req.file.buffer, {
+    filename: "recording.wav",
+    contentType: req.file.mimetype
+  });
+
+  //send job to fast transcription
+  form.append("definition", JSON.stringify(definition));
+  const azureResponse = await axios.post(
+      `https://${AZURE_REGION}.api.cognitive.microsoft.com/speechtotext/transcriptions:transcribe?api-version=2024-11-15`,
+      form,
+      {
+        headers: {
+          ...form.getHeaders(),
+          "Ocp-Apim-Subscription-Key": AZURE_KEY
+        }
+      }
+    );
+
+    //save json file
+    saveJson(azureResponse.data)
+    //return json file
+    res.status(200).json({
+      jobUrl: azureResponse.data,
+      text_format: prettifyFast(azureResponse.data)
+    });
+  }catch (error) {
+  console.error("Error:", error.response?.data || error.message);
+  res.status(500).json({ error: "Failed to submit transcription job" });
+}
+})
+
+//routing logic to upload audio to blob storage and Azure service
+app.post("/upload_audio", upload.single("audio"), async (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ error: "No audio file uploaded" });
+  }
+
+  try {
+    const audioBuffer = req.file.buffer;
+    const originalName = req.file.originalname || "audio.wav"; //convert .webm to .wav
+    const fileName = `upload_${Date.now()}_${originalName}`; //placeholder naming convention for audio file
+    //max speakers
+    const maxSpeakers = parseInt(req.body.maxSpeakers) || 2;
+
+
+    //save blob
+    const fullBlobUrl = await saveBlob(fileName,req.file.mimetype ,audioBuffer, 'test1'  )
+
+    // Submit transcription job to get reciept
+    const data = await batchTranscript(fileName, maxSpeakers) //batch
+
     saveJson(data) // save json file to json_script folder
     console.log("data saved in json_script folder.")//success message
 
@@ -180,8 +243,6 @@ app.post("/upload_audio", upload.single("audio"), async (req, res) => {
     res.status(500).json({ error: "Failed to submit transcription job" });
   }
 });
-
-
 
 
 app.listen(PORT, () => {

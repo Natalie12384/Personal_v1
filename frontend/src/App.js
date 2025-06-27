@@ -114,7 +114,41 @@ function SimpleRecordButton() {
     } 
 
   }
+  const handleFT= async (audioBlob) =>{
+    console.log("pressed")
+    if (!audioBlob) return;
 
+    const formData = new FormData();
+    formData.append("audio", audioBlob, "recording.wav");
+    formData.append("definition", JSON.stringify({
+      locale: ["en-US"],
+      diarization: {
+        enabled: true,
+        maxSpeakers: maxSpeakers
+      }
+    }));
+    console.log(formData)
+    try { // send audio via post request
+      const bkUrl = "http://localhost:" + portNumber + "/fast_transcript";
+      const response = await fetch(bkUrl, {
+        method: "POST",
+        body: formData
+      })
+      if (!response.ok) {
+        console.log("Failed to upload audio", response)
+        throw new Error("Failed to upload audio");
+      } 
+      const data = await response.json();
+      console.log("Upload successful:", data);
+      setTranscriptJson(data.jobUrl); // do not stringify
+      setTranscriptText(data.text_format);
+      return data;
+      //any error is caught
+  } catch (error) {
+    console.error("Error uploading audio:", error);
+  } 
+
+  }
   
 // html
 return (
@@ -177,9 +211,14 @@ return (
     {/* Send Audio Button */}
     <div className="mb-4">
       {audioBlob ? (
+        <div> 
         <button className="btn btn-primary" onClick={() => handleSendAudio(audioBlob)}>
-          Send Audio
+          Batch Transcript
         </button>
+        <button className="btn btn-primary" onClick={() => handleFT(audioBlob)}>
+          Fast Transcript
+        </button>
+        </div>
       ) : (
         <button className="btn btn-secondary" disabled>
           No Audio Available
